@@ -1,0 +1,32 @@
+{
+  "name": "@andrewstart/submodule-helper",
+  "version": "1.0.0",
+  "description": "Helps in a few git submodule tasks",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/andrewstart/submodule-helper.git"
+  },
+  "keywords": [
+    "git",
+    "submodule"
+  ],
+  "author": "Andrew Start (https://github.com/andrewstart)",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/andrewstart/submodule-helper/issues"
+  },
+  "homepage": "https://github.com/andrewstart/submodule-helper#readme",
+  "dependencies": {
+    "rimraf": "^3.0.2"
+  },
+  "bin": {
+    "submodule": "./index.js"
+  },
+  "files": [
+    "./index.js"
+  ]
+}
