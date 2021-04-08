@@ -5,13 +5,14 @@ const readFile = util.promisify(fs.readFile);
 const _exec = util.promisify(require('child_process').exec);
 const path = require('path');
 
-async function exec(command, cwd)
+async function exec(command, cwd, returnVal = false)
 {
 	try
 	{
 		const { stdout, stderr } = await _exec(command, {cwd: cwd || process.cwd()});
-		if (stdout) console.log(stdout);
+		if (stdout && !returnVal) console.log(stdout);
 		if (stderr) console.error(stderr);
+		if (returnVal) return (stdout || '');
 	}
 	catch (e)
 	{
@@ -19,13 +20,12 @@ async function exec(command, cwd)
 	}
 }
 
-async function main()
+async function readModules(gitModulesPath)
 {
-	const args = process.argv.slice(2);
 	let modules = [];
 	try
 	{
-		for (const match of (await readFile('.gitmodules', 'utf8')).matchAll(/\[submodule "([^"]+)"\]/g))
+		for (const match of (await readFile(gitModulesPath, 'utf8')).matchAll(/\[submodule "([^"]+)"\]/g))
 		{
 			modules.push(match[1]);
 		}
@@ -34,6 +34,13 @@ async function main()
 	{
 		console.error('Could not read .gitmodules:', e.message);
 	}
+	return modules;
+}
+
+async function main()
+{
+	const args = process.argv.slice(2);
+	const modules = await readModules('.gitmodules');
 	let targetModule = args[1];
 	if (targetModule && targetModule.endsWith('/'))
 	{
@@ -83,6 +90,34 @@ async function main()
 			break;
 		case 'list':
 			console.log(modules.join('\n'));
+			break;
+		case 'sync':
+			if (!targetModule) return;
+			const hash = await exec('git rev-parse HEAD', path.resolve(process.cwd(), targetModule), true);
+			for (const module of modules)
+			{
+				if (targetModule === module) continue;
+
+				const nestedModules = await readModules(path.join(module, '.gitmodules'));
+				for (const nest of nestedModules)
+				{
+					if (nest === targetModule)
+					{
+						console.log(`Ensuring that ${module} is up to date...`);
+						const modulePath = path.resolve(process.cwd(), module);
+						const subSubModulePath = path.resolve(process.cwd(), module, nest);
+						await exec(`git submodule update --init --depth=1 ${targetModule}`, modulePath);
+						if (await exec('git rev-parse HEAD', modulePath, true) !== hash)
+						{
+							await exec(`git fetch --depth=1`, subSubModulePath);
+							await exec(`git checkout ${hash}`, subSubModulePath);
+							await exec(`git add ${targetModule}`, modulePath);
+						}
+						await exec(`git submodule deinit -f ${targetModule}`, modulePath);
+						break;
+					}
+				}
+			}
 			break;
 	}
 }
