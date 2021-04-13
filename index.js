@@ -93,7 +93,8 @@ async function main()
 			break;
 		case 'sync':
 			if (!targetModule) return;
-			const hash = await exec('git rev-parse HEAD', path.resolve(process.cwd(), targetModule), true);
+			let hash = await exec('git rev-parse HEAD', path.resolve(process.cwd(), targetModule), true);
+			hash = hash.trim();
 			for (const module of modules)
 			{
 				if (targetModule === module) continue;
@@ -105,15 +106,9 @@ async function main()
 					{
 						console.log(`Ensuring that ${module} is up to date...`);
 						const modulePath = path.resolve(process.cwd(), module);
-						const subSubModulePath = path.resolve(process.cwd(), module, nest);
-						await exec(`git submodule update --init --depth=1 ${targetModule}`, modulePath);
-						if (await exec('git rev-parse HEAD', modulePath, true) !== hash)
-						{
-							await exec(`git fetch --depth=1`, subSubModulePath);
-							await exec(`git checkout ${hash}`, subSubModulePath);
-							await exec(`git add ${targetModule}`, modulePath);
-						}
-						await exec(`git submodule deinit -f ${targetModule}`, modulePath);
+						let mode = await exec(`git ls-files --stage ${targetModule}`, modulePath, true);
+						mode = mode.substring(0, mode.indexOf(' '));
+						await exec(`git update-index --add --cacheinfo ${mode},${hash},${targetModule}`, modulePath);
 						break;
 					}
 				}
