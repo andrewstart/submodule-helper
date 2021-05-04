@@ -46,6 +46,10 @@ async function main()
 	{
 		targetModule = targetModule.substring(0, targetModule.length - 1);
 	}
+	let secondaryTarget = args[2];
+	if (secondaryTarget && secondaryTarget.endsWith('/')) {
+		secondaryTarget = secondaryTarget.substring(0, secondaryTarget.length - 1);
+	}
 	switch (args[0])
 	{
 		case 'clean':
@@ -98,6 +102,7 @@ async function main()
 			for (const module of modules)
 			{
 				if (targetModule === module) continue;
+				if (secondaryTarget && secondaryTarget !== module) continue;
 
 				const nestedModules = await readModules(path.join(module, '.gitmodules'));
 				for (const nest of nestedModules)
