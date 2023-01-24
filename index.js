@@ -4,6 +4,7 @@ const rimraf = util.promisify(require('rimraf'));
 const readFile = util.promisify(fs.readFile);
 const _exec = util.promisify(require('child_process').exec);
 const path = require('path');
+const { Command } = require('commander');
 
 async function exec(command, cwd, returnVal = false)
 {
@@ -37,22 +38,43 @@ async function readModules(gitModulesPath)
 	return modules;
 }
 
+async function readBranches(configPath)
+{
+	const branches = new Map();
+	try
+	{
+		const lines = (await readFile(configPath, 'utf8')).split(/[\r\n]+/);
+		for (const line of lines)
+		{
+			const [module, branch] = line.split(' ');
+			branches.set(module, branch);
+		}
+	}
+	catch (e)
+	{
+		// optional file is probably not present, just eat the error
+	}
+	return branches;
+}
+
+function cleanModuleName(module)
+{
+	if (module && module.endsWith('/'))
+		return module.substring(0, module.length - 1);
+	return module;
+}
+
 async function main()
 {
-	const args = process.argv.slice(2);
 	const modules = await readModules('.gitmodules');
-	let targetModule = args[1];
-	if (targetModule && targetModule.endsWith('/'))
-	{
-		targetModule = targetModule.substring(0, targetModule.length - 1);
-	}
-	let secondaryTarget = args[2];
-	if (secondaryTarget && secondaryTarget.endsWith('/')) {
-		secondaryTarget = secondaryTarget.substring(0, secondaryTarget.length - 1);
-	}
-	switch (args[0])
-	{
-		case 'clean':
+	const branches = await readBranches('.modulebranches');
+
+	const program = new Command();
+	program
+		.command('clean [targetModule]')
+		.description('Removes all changes in all submodules, or a single submodule.')
+		.action(async (targetModule) => {
+			targetModule = cleanModuleName(targetModule);
 			for (const module of modules)
 			{
 				if (targetModule && targetModule !== module) continue;
@@ -63,17 +85,29 @@ async function main()
 				await exec(`git rm -f ${module} && git reset .gitmodules ${module}`);
 				await exec(`git checkout -- .gitmodules ${module}`);
 			}
-			break;
-		case 'checkout':
+		});
+	program
+		.command('checkout [targetModule]')
+		.description('Checks out submodule(s) to current commit, and installs dependencies via pnpm.')
+		.action(async (targetModule) => {
+			targetModule = cleanModuleName(targetModule);
 			for (const module of modules)
 			{
 				if (targetModule && targetModule !== module) continue;
 
 				await exec(`git submodule update --init ${module}`);
+				if (branches.has(module))
+				{
+					await exec(`git checkout ${branches.get(module)}`, path.resolve(process.cwd(), module));
+				}
 				await exec(`pnpm i -P`, path.resolve(process.cwd(), module));
 			}
-			break;
-		case 'pull':
+		});
+	program
+		.command('pull [targetModule]')
+		.description('Pulls latest commit in submodule(s).')
+		.action(async (targetModule) => {
+			targetModule = cleanModuleName(targetModule);
 			for (const module of modules)
 			{
 				if (targetModule && targetModule !== module) continue;
@@ -81,8 +115,12 @@ async function main()
 				await exec(`git submodule sync ${module} && git submodule update --remote ${module}`);
 				await exec(`pnpm i -P`, path.resolve(process.cwd(), module));
 			}
-			break;
-		case 'remove':
+		});
+	program
+		.command('remove [targetModule]')
+		.description('Removes submodule(s) from repository.')
+		.action(async (targetModule) => {
+			targetModule = cleanModuleName(targetModule);
 			for (const module of modules)
 			{
 				if (targetModule && targetModule !== module) continue;
@@ -91,35 +129,43 @@ async function main()
 				await rimraf(`.git/modules/${module}`);
 				await exec(`git rm -f ${module} && git reset .gitmodules ${module}`);
 			}
-			break;
-		case 'list':
+		});
+	program
+		.command('list')
+		.description('Lists all submodules in the repository.')
+		.action(async () => {
 			console.log(modules.join('\n'));
-			break;
-		case 'sync':
-			if (!targetModule) return;
-			let hash = await exec('git rev-parse HEAD', path.resolve(process.cwd(), targetModule), true);
+		});
+	program
+		.command('sync <moduleDependency> [targetModule]')
+		.description('Updates submodule(s) version of the shared dependency (also a submodule) to current commit.')
+		.action(async (moduleDependency, targetModule) => {
+			if (!moduleDependency) return;
+			moduleDependency = cleanModuleName(moduleDependency);
+			targetModule = cleanModuleName(targetModule);
+			let hash = await exec('git rev-parse HEAD', path.resolve(process.cwd(), moduleDependency), true);
 			hash = hash.trim();
 			for (const module of modules)
 			{
-				if (targetModule === module) continue;
-				if (secondaryTarget && secondaryTarget !== module) continue;
+				if (moduleDependency === module) continue;
+				if (targetModule && targetModule !== module) continue;
 
 				const nestedModules = await readModules(path.join(module, '.gitmodules'));
 				for (const nest of nestedModules)
 				{
-					if (nest === targetModule)
+					if (nest === moduleDependency)
 					{
 						console.log(`Ensuring that ${module} is up to date...`);
 						const modulePath = path.resolve(process.cwd(), module);
-						let mode = await exec(`git ls-files --stage ${targetModule}`, modulePath, true);
+						let mode = await exec(`git ls-files --stage ${moduleDependency}`, modulePath, true);
 						mode = mode.substring(0, mode.indexOf(' '));
-						await exec(`git update-index --add --cacheinfo ${mode},${hash},${targetModule}`, modulePath);
+						await exec(`git update-index --add --cacheinfo ${mode},${hash},${moduleDependency}`, modulePath);
 						break;
 					}
 				}
 			}
-			break;
-	}
+		});
+	return program.parseAsync();
 }
 
 main();
